@@ -13,10 +13,9 @@ nltk.download('punkt')
 nltk.download('stopwords')
 stopwords = set(stopwords.words('english'))
 
-ted_dir = "../ted-talks/data/"
-ndict = {}
+ted_main_dir = "./data/ted_main.csv"
+ted_transcript_dir = "./data/transcripts.csv"
 
-abbrev = []
 
 def ct(char):
 	if char == '(':
@@ -37,6 +36,7 @@ def ct(char):
 		return -1
 	else:
 		return 0
+
 
 def text_cleaner(text):
 	ntext = ''
@@ -92,16 +92,11 @@ def text_cleaner(text):
 			ntext += c
 		i += 1
 	
-	
-	return ''.join(c for c in ntext if c.isalpha() or c == ' ')
+	return ntext
 
 def load_data(ted_main_dir, ted_transcript_dir):
-	input_gen = open("input_gen.txt", 'w')
-	ted_video_list = []
-	ted_transcript = {}
-	url_to_title = {}
 	ted_data = {}
-	with open(ted_dir+"ted_main.csv", 'r') as ted_main_file:
+	with open(ted_main_dir, 'r') as ted_main_file:
 		ted_main_csv = csv.reader(ted_main_file, delimiter=',')
 		ted_main_headers = next(ted_main_csv)
 
@@ -109,63 +104,24 @@ def load_data(ted_main_dir, ted_transcript_dir):
 			video = {}
 			for i, k in enumerate(ted_main_headers):
 				video[k] = row[i].strip()
-			video['id'] = len(ted_video_list)
-			ted_video_list.append(video)
-			#url_to_title[video['url']] = ''.join([c for c in video['title'] if c.isalpha() or c == ' ']).strip().lower()
-			url_to_title[video['url']] = video['title']
 
 			ted_data[video['url']] = video
-			#print(video['url'], '   |||   ', url_to_title[video['url']])
 
 
-	with open(ted_dir+"transcripts.csv", 'r') as ted_transcripts:
+	with open(ted_transcript_dir, 'r') as ted_transcripts:
 		ted_transcript_csv = csv.reader(ted_transcripts, delimiter=',')
 		ted_transcript_headers = next(ted_transcript_csv)
 
 		for i, row in enumerate(ted_transcript_csv):
 			url  = row[1].strip()
 			text = row[0].strip().lower()
-			#text = "<sos> " + text_cleaner(text) + " <eos>"
 			text = text_cleaner(text)
 
 			ted_data[url]['transcript'] = text
 
-			#script_file = open('preprocess/'+url_to_title[url]+'.txt', 'w')
-			#script_file.write(text)
-			#script_file.close()
-
-			input_gen.write(text + '\n')
-			input_gen.flush()
-
-			word_tokens = text.split()
-			wt_proc = []
-			for w in word_tokens:
-				if w[0] == '(' and w[-1] == ')':
-					if w not in ndict:
-						print(w)
-					ndict.setdefault(w, 0)
-					ndict[w] += 1
-			ted_transcript[row[1]] = word_tokens
-
-	cPickle.dump(ted_data, open("ted_data.p", "wb"))
-	input_gen.close()
-	return ted_video_list, ted_transcript
-
+	cPickle.dump(ted_data, open("ted_data.pkl", "wb"))
 
 
 if __name__ == '__main__':
-	print('loading data...')
-
-	ted_main_dir = "data/ted_main.csv"
-	ted_transcript_dir = "data/transcripts.csv"
-
-	ted_video_list, ted_transcript = load_data(ted_main_dir, ted_transcript_dir)
-	#print(ted_video_list, ted_transcript)
-	sounds = open('sounds.txt', 'w')
-	for w in ndict:
-		print(w, ndict[w])
-		sounds.write(w + ' : ' + str(ndict[w]) + '\n')
-	sounds.close()
-
-	cPickle.dump(ted_video_list, open("ted_video_list.p", "wb"))
-	cPickle.dump(ted_transcript, open("ted_transcript.p", "wb"))
+	print 'loading data...'
+	load_data(ted_main_dir, ted_transcript_dir)
