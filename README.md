@@ -30,12 +30,6 @@ will train the SMN model and result in the './model'.
 will finally visualize the trajectory into image.
 
 
-<del>
-    python ted_similarity.py 
-    
-will calculate the similarity between the videos.
-</del>
-
 
 
 
