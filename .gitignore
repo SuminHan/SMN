@@ -3,3 +3,6 @@
 !/fig
 !model
 /fig/*
+input_gen.txt
+ted_data.pkl
+*.swp

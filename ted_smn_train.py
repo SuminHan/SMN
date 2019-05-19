@@ -17,6 +17,7 @@ from gensim.scripts.glove2word2vec import glove2word2vec
 from nltk.corpus import stopwords  
 stopWords = stopwords.words('english')
 
+span_size = 30
 
 # assemble the network
 def build_rmn(d_word, d_rating, d_split, d_hidden, len_voc, num_descs, We, kidxes=None,
@@ -131,7 +132,7 @@ if __name__ == '__main__':
 	initial_run = True
 
 	print 'loading data...'
-	ted_data = cPickle.load(open('ted_data.p', 'rb'))
+	ted_data = cPickle.load(open('ted_data.pkl', 'rb'))
 
 	#rating_tags = {}
 	rating_tags = {'Ingenious': 1, 'Funny': 0, 'Inspiring': 4, 'OK': 13, 'Fascinating': 5, 'Persuasive': 7, 'Longwinded': 10, 'Informative': 2, 'Unconvincing': 12, 'Beautiful': 6, 'Jaw-dropping': 11, 'Obnoxious': 8, 'Courageous': 3, 'Confusing': 9}
@@ -201,7 +202,6 @@ if __name__ == '__main__':
 		We = cPickle.load(open(We_file, 'rb'))
 		Vi = cPickle.load(open(Vi_file, 'rb'))
 	
-	span_size = 120
 	def data_vectorize(title, rating, transcript):
 		vec_title = np.zeros(d_word, dtype=float)
 		vec_rating = rating / sum(rating)
@@ -213,25 +213,22 @@ if __name__ == '__main__':
 		if sum(vec_title) != 0:
 			vec_title /= sum(vec_title) 
 
-		script_tokens = transcript.split()
-		i_from = 0
-		while i_from < len(script_tokens):
+		for line in transcript.split('.'):
 			vec = np.zeros(span_size, dtype=np.int32)
 			mask = np.zeros(span_size, dtype=float)
-			i_to = min(i_from + span_size, len(script_tokens))
-			ind = 0
-			for i in range(i_from, i_to):
-				if script_tokens[i] in stopWords:
-					vec[ind] = 0
+			#print line.strip().split()
+			for i, w in enumerate(line.strip().split()):
+				if i >= span_size:
+					break
+				if w in stopWords:
+					vec[i] = 0
 				else:
-					vec[ind] = Vi[script_tokens[i]]
-					
-				mask[ind] = 1.0
-				ind += 1
+					vec[i] = Vi[w]
+				
+				mask[i] = 1.0
 			vec_script.append(vec)
 			mask_script.append(mask)
-			i_from = i_to
-		
+				
 		vec_script = np.array(vec_script)
 		mask_script = np.array(mask_script)
 
