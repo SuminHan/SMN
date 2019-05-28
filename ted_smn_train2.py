@@ -3,6 +3,7 @@ import numpy as np
 import theano.tensor as T 
 from layers import *
 from util import *
+from lasagne.layers import *
 
 import ast, json
 import os
@@ -14,63 +15,50 @@ stopWords = stopwords.words('english')
 
 
 # assemble the network
-def build_rmn(d_word, d_rating, d_split, d_hidden, len_voc, num_descs, We, kidxes=None,
-	freeze_words=True, eps=1e-5, lr=0.01, negs=10):
-	if kidxes != None:
-		num_descs = len(kidxes)
-	print 'd_word', d_word
-	print 'd_rating', d_rating
-	print 'd_split', d_split
+def build_rmn(span_size, d_word, d_hidden, len_voc, num_descs, eps=1e-5, lr=0.01):
 	print 'd_hidden', d_hidden
 	print 'len_voc', len_voc
 	print 'num_desc', num_descs
 
 	# input theano vars
 	in_spans = T.imatrix(name='spans')
-	in_neg = T.imatrix(name='neg_spans')
-	in_rating = T.dvector(name='rating')
-	in_title = T.dvector(name='title')
+	in_slen = T.imatrix('sent_length')
+	in_empty = T.imatrix('empty')
+	in_laughter = T.imatrix('num_laughter')
+	in_applause = T.imatrix('num_applause')
 	in_currmasks = T.matrix(name='curr_masks')
-	in_dropmasks = T.matrix(name='drop_masks')
-	in_negmasks = T.matrix(name='neg_masks')
 
 	# define network
 	l_inspans = lasagne.layers.InputLayer(shape=(None, span_size), 
         input_var=in_spans)
-	l_inneg = lasagne.layers.InputLayer(shape=(negs, span_size), 
-		input_var=in_neg)
-	l_inrating = lasagne.layers.InputLayer(shape=(d_rating,),
-		input_var=in_rating)
-	l_intitle = lasagne.layers.InputLayer(shape=(d_word,),
-		input_var=in_title)
 	l_currmask = lasagne.layers.InputLayer(shape=(None, span_size), 
 		input_var=in_currmasks)
-	l_dropmask = lasagne.layers.InputLayer(shape=(None, span_size), 
-		input_var=in_dropmasks)
-	l_negmask = lasagne.layers.InputLayer(shape=(negs, span_size), 
-		input_var=in_negmasks)
+	l_slen = lasagne.layers.InputLayer(shape=(None, 1), 
+		input_var=in_slen)
+	l_empty = lasagne.layers.InputLayer(shape=(None, 1), 
+		input_var=in_empty)
+	l_laughter = lasagne.layers.InputLayer(shape=(None, 1), 
+		input_var=in_laughter)
+	l_applause = lasagne.layers.InputLayer(shape=(None, 1), 
+		input_var=in_applause)
 
-	# negative examples should use same embedding matrix
+
 	l_emb = MyEmbeddingLayer(l_inspans, len_voc, 
-			d_word, W=We, name='word_emb')
-	l_negemb = MyEmbeddingLayer(l_inneg, len_voc, 
-			d_word, W=l_emb.W, name='word_emb_copy1')
+			d_word, name='word_emb')
 
 	# freeze embeddings
-	if freeze_words:
-		l_emb.params[l_emb.W].remove('trainable')
-		l_negemb.params[l_negemb.W].remove('trainable')
+	#if freeze_words:
+	#	l_emb.params[l_emb.W].remove('trainable')
 
 		
 
 	# average each span's embeddings
 	l_currsum = AverageLayer([l_emb, l_currmask], d_word)
-	l_dropsum = AverageLayer([l_emb, l_dropmask], d_word)
-	l_negsum = AverageLayer([l_negemb, l_negmask], d_word)
+	#l_curr = ElemwiseMergeLayer([l_spans, l_currmask], T.mul)
 
 	# pass all embeddings thru feed-forward layer
-	l_mix = TedMixingLayer([l_dropsum, l_intitle, l_inrating],
-			d_word, d_rating)
+	l_concat = ConcatLayer([l_currsum, l_slen, l_empty, l_laughter, l_applause])
+	l_mix = DenseLayer(l_concat, d_word)
 
 	# compute recurrent weights over dictionary
 	l_rels = RecurrentRelationshipLayer(\
@@ -78,25 +66,16 @@ def build_rmn(d_word, d_rating, d_split, d_hidden, len_voc, num_descs, We, kidxe
 
 	# multiply weights with dictionary matrix
 	l_recon = ReconLayer(l_rels, d_word, num_descs)
-	if kidxes != None:
-		#l_recon.params[l_recon.R].remove('trainable')
-		myR = np.zeros((num_descs, d_word))
-		for i, ki in enumerate(kidxes):
-			myR[i] = We[ki]
-		l_recon.R.set_value(myR)
 
 	# compute loss
 	currsums = lasagne.layers.get_output(l_currsum)
-	negsums = lasagne.layers.get_output(l_negsum)
 	recon = lasagne.layers.get_output(l_recon)
 
 	currsums /= currsums.norm(2, axis=1)[:, None]
 	recon /= recon.norm(2, axis=1)[:, None]
-	negsums /= negsums.norm(2, axis=1)[:, None]
 	correct = T.sum(recon * currsums, axis=1)
-	negs = T.dot(recon, negsums.T)
 	loss = T.sum(T.maximum(0., 
-				T.sum(1. - correct[:, None] + negs, axis=1)))
+				T.sum(1. - correct[:, None], axis=1)))
 
 	# enforce orthogonality constraint
 	norm_R = l_recon.R / l_recon.R.norm(2, axis=1)[:, None]
@@ -106,15 +85,14 @@ def build_rmn(d_word, d_rating, d_split, d_hidden, len_voc, num_descs, We, kidxe
 
 	all_params = lasagne.layers.get_all_params(l_recon, trainable=True)
 	updates = lasagne.updates.adam(loss, all_params, learning_rate=lr)
-	#traj = traj_fn(rating, title, curr, cm)
-	traj_fn = theano.function([in_title, in_rating, 
-			in_spans, in_dropmasks], 
+
+	traj_fn = theano.function([in_spans, in_currmasks, in_slen, 
+			in_empty, in_laughter, in_applause],
 			lasagne.layers.get_output(l_rels))
 	
-	#ex_cost, ex_ortho = train_fn(title, rating, curr, cm, drop_mask, ns, nm)
-	train_fn = theano.function([in_title, in_rating, 
-			in_spans, in_currmasks, in_dropmasks,
-			in_neg, in_negmasks], 
+	#ex_cost, ex_ortho = train_fn(span, mask, slen, empty, laughter, applause, allow_input_downcast=True)
+	train_fn = theano.function([in_spans, in_currmasks, in_slen, 
+			in_empty, in_laughter, in_applause],
 			[loss, ortho_penalty], updates=updates)
 	return train_fn, traj_fn, l_recon
 
@@ -158,25 +136,30 @@ if __name__ == '__main__':
 
 	d = nv_counter
 	num_fb = 1000 # number of frequent bigram
-	fbmap = {} # frequent bigram map
+	fbmap = {None: 0} # frequent bigram map
 	for i in sorted(d, key=d.get, reverse=True):
 		if rnvmap[i] == '_' or rnvmap[i] == '_ _': continue
-		fbmap[i] = len(fbmap)+1 # starts from 0; which represents  not listed on fbmap
+		fbmap[i] = len(fbmap)
 		if len(fbmap) >= num_fb: break
 		if d[i] == 0: break
 		print i, '\t', rnvmap[i], '\t', d[i]
 	rfbmap = {v:k for k, v in fbmap.items()}
 
-
+	
+	ted_train_data = []
 	for url, data in prep_corpus.items():
 		length = data['length']
 		data_script = data['script']
 		data_mask = np.zeros(data_script.shape, dtype=np.int32)
 		data_empty = np.zeros(length, dtype=np.int32)
+		data_slen = np.zeros(length, dtype=np.int32)
 		for i in range(length):
 			is_empty = True
+			scount = 0
 			for j in range(span_size):
 				wbg = data_script[i, j]
+				if wbg != 0:
+					scount += 1
 				if wbg not in fbmap:
 					data_script[i, j] = 0
 					data_mask[i, j] = 0
@@ -187,16 +170,21 @@ if __name__ == '__main__':
 		
 			if is_empty:
 				data_empty[i] = 1
+			data_slen[i] = scount
 
 		data['mask'] = data_mask
 		data['empty'] = data_empty
+		data['slen'] = data_slen
+		ted_train_data.append(data)
 		print(data)
-
-	
+		
 
 	descriptor_log = 'models/descriptors.log'
 	trajectory_log = 'models/trajectories.log'
 
+	
+	# d_word
+	d_word = 300
 
 	# embedding/hidden dimensionality
 	d_hidden = 256
@@ -208,27 +196,14 @@ if __name__ == '__main__':
 	# p_drop = 0.75
 
 	n_epochs = 300
-	lr = 0.001
-	eps = 1e-6
+	lr = 0.01
+	eps = 1e-5
 	num_traj = len(prep_corpus)
 	len_voc = len(fbmap)
 	
 	print 'compiling...'
-
-	keys = ['_', 'people', 'time', 'world', 'laughter', 'life', 
-			'applause', 'human', 'love', 'joy', 'sadness', 'lonely',
-			'technology', 'entertainment', 'design', 'science', 'idea',
-			'business', 'culture', 'motivation', 'goal', 'potential', 'psychology', 'emotion']
-	#keytags['_'] = 10000
-	#kidxes = [Vi[w] for w in keytags if w in Vi and w in w2v_model and keytags[w] > 100]
-	#kidxes = [Vi[w] for w in keys]
-	kidxes=None
-	#for i in kidxes:
-	#	print revmap[i],
-	#print ''
 	train_fn, traj_fn, final_layer = build_rmn(
-			d_word, d_rating, d_split, d_hidden, len_voc, num_descs, We, kidxes=kidxes,
-			freeze_words=True, eps=1e-5, lr=0.01, negs=10)
+		span_size, d_word, d_hidden, len_voc, num_descs, eps=eps, lr=lr)
 	print 'done compiling, now training...'
 
 	# training loop
@@ -237,16 +212,19 @@ if __name__ == '__main__':
 		cost = 0.
 		random.shuffle(ted_train_data)
 		start_time = time.time()
-		for title, rating, curr, cm in span_data:
-			ns, nm = generate_negative_samples(\
-				num_traj, span_size, num_negs, span_data)
+		for data in ted_train_data:
+			length = data['length']
+			span = data['script']
+			mask = data['mask']
+			slen = data['slen'].reshape((length, 1))
+			empty = data['empty'].reshape((length, 1))
+			laughter = data['laughter'].reshape((length, 1))
+			applause = data['applause'].reshape((length, 1))
 
-			# word dropout
-			drop_mask = (np.random.rand(*(cm.shape)) < (1 - p_drop)).astype('float32')
-			drop_mask *= cm
 
-			#print title.shape, rating.shape, curr.shape, cm.shape
-			ex_cost, ex_ortho = train_fn(title, rating, curr, cm, drop_mask, ns, nm)
+			print(span.shape, mask.shape, slen.shape, empty.shape, laughter.shape, applause.shape)
+
+			ex_cost, ex_ortho = train_fn(span, mask, slen, empty, laughter, applause)
 			cost += ex_cost
 
 		end_time = time.time()
@@ -279,16 +257,20 @@ if __name__ == '__main__':
 			traj_writer = csv.writer(tlog)
 			traj_writer.writerow(['Title'] + \
 				['Topic ' + str(i) for i in range(num_descs)])
-			for idx, (title, rating, curr, cm) in enumerate(span_data):
-				#c1, c2 = [cmap[c] for c in chars]
-				#bname = bmap[book[0]]
 
-				# feed unmasked inputs to get trajectories
-				traj = traj_fn(title, rating, curr, cm)
+			for idx, data in enumerate(ted_train_data):
+				span = data['script']
+				mask = data['mask']
+				slen = data['slen']
+				empty = data['empty']
+				laughter = data['laughter']
+				applause = data['applause']
+
+				traj = traj_fn(span, mask, slen, empty, laughter, applause)
+
 				for ind in range(len(traj)):
 					step = traj[ind]
-					traj_writer.writerow([ted_titles[idx]] + \
-					list(step) )   
+					traj_writer.writerow([str(idx)] + list(step) )   
 
 			tlog.flush()
 			tlog.close()

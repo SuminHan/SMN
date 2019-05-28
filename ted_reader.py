@@ -278,9 +278,9 @@ def prep_data(ted_data, ted_voca, ted_actn, ted_freq):
 		if len(tot_sents) != 0:
 			prep_corpus[url] = {}
 			prep_corpus[url]['length'] = len(tot_sents)
-			prep_corpus[url]['script'] = np.array(tot_sents)
-			prep_corpus[url]['laughter'] = np.array(tot_laughter)
-			prep_corpus[url]['applause'] = np.array(tot_applause)
+			prep_corpus[url]['script'] = np.array(tot_sents, dtype=np.int32)
+			prep_corpus[url]['laughter'] = np.array(tot_laughter, dtype=np.int32)
+			prep_corpus[url]['applause'] = np.array(tot_applause, dtype=np.int32)
 
 			'''print prep_corpus[url]
 			for tag in prep_corpus[url]:

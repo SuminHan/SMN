@@ -86,6 +86,39 @@ class MixingLayer(lasagne.layers.MergeLayer):
 
 
 # mix word embeddings with global character/book embeddings
+'''class SMNLayer(lasagne.layers.MergeLayer):
+    def __init__(self, incomings, span_size, d, **kwargs):
+
+        super(SMN_MixingLayer, self).__init__(incomings, **kwargs)
+        self.d = d
+        self.W_c = self.add_param(lasagne.init.GlorotUniform(), 
+            (span_size, d), name='W_c')
+        self.b_c = self.add_param(lasagne.init.Constant(0), 
+            (d,), name='b_c')
+        self.W_slen = self.add_param(lasagne.init.GlorotUniform(), 
+            (d, d), name='W_title') 
+        self.b_title = self.add_param(lasagne.init.Constant(0), 
+            (d,), name='b_title') 
+        self.W_rating = self.add_param(lasagne.init.GlorotUniform(), 
+            (d_rating, d,), name='W_rating') 
+        self.b_rating = self.add_param(lasagne.init.Constant(0), 
+            (d,), name='b_rating') 
+        self.f = lasagne.nonlinearities.rectify
+
+    def get_output_for(self, inputs, **kwargs):
+        spanvec = T.dot(inputs[0], self.W_m) + self.b_m
+        tvec = T.dot(inputs[1], self.W_title) + self.b_title
+        rvec = T.dot(inputs[2], self.W_rating) + self.b_rating 
+
+        return self.f(spanvec + tvec[None, :] + rvec[None, :])
+
+    # num_spans, self.d
+    def get_output_shape_for(self, input_shapes):
+        return (None, self.d)'''
+
+
+
+# mix word embeddings with global character/book embeddings
 class TedMixingLayer(lasagne.layers.MergeLayer):
     def __init__(self, incomings, d, d_rating, **kwargs):
 
