@@ -46,6 +46,18 @@ def load_data(span_path, metadata_path):
     return span_data, max_len, wmap, cmap, bmap
 
 
+def ted_generate_negative_samples(num_traj, span_size, negs, span_data):
+    inds = np.random.randint(0, num_traj, negs)
+    neg_words = np.zeros((negs, span_size)).astype('int32')
+    neg_masks = np.zeros((negs, span_size)).astype('float32')
+    for index, i in enumerate(inds):
+        rand_ind = np.random.randint(0, span_data[i]['length'])
+        neg_words[index] = span_data[i]['script'][rand_ind]
+        neg_masks[index] = span_data[i]['mask'][rand_ind]
+
+    return neg_words, neg_masks
+
+
 def generate_negative_samples(num_traj, span_size, negs, span_data):
     inds = np.random.randint(0, num_traj, negs)
     neg_words = np.zeros((negs, span_size)).astype('int32')

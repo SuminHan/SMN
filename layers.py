@@ -22,6 +22,28 @@ class MyEmbeddingLayer(lasagne.layers.Layer):
         return self.W[input]
 
 # compute vector average
+class MyAverageLayer(lasagne.layers.MergeLayer):
+    def __init__(self, incomings, d, **kwargs):
+        super(MyAverageLayer, self).__init__(incomings, **kwargs)
+        self.d = d
+        self.sum = False
+
+    def get_output_for(self, inputs, **kwargs):
+
+        emb_sums = T.sum(inputs[0] * inputs[1], axis=1)
+        return emb_sums
+        #if self.sum:
+        #    return emb_sums
+        #else:
+        #    mask_sums = T.sum(inputs[1], axis=1)
+        #    return emb_sums / mask_sums[:,None]
+
+    # batch_size x max_spans x d
+    def get_output_shape_for(self, input_shapes):
+        return (None, self.d)
+
+
+# compute vector average
 class AverageLayer(lasagne.layers.MergeLayer):
     def __init__(self, incomings, d, **kwargs):
         super(AverageLayer, self).__init__(incomings, **kwargs)

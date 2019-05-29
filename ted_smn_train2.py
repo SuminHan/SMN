@@ -22,17 +22,19 @@ def build_rmn(span_size, d_word, d_hidden, len_voc, num_descs, eps=1e-5, lr=0.01
 
 	# input theano vars
 	in_spans = T.imatrix(name='spans')
-	in_slen = T.imatrix('sent_length')
-	in_empty = T.imatrix('empty')
-	in_laughter = T.imatrix('num_laughter')
-	in_applause = T.imatrix('num_applause')
+	in_neg = T.imatrix(name='neg_spans')
+	in_slen = T.matrix('sent_length')
+	in_empty = T.matrix('empty')
+	in_laughter = T.matrix('num_laughter')
+	in_applause = T.matrix('num_applause')
 	in_currmasks = T.matrix(name='curr_masks')
+	in_negmasks = T.matrix(name='neg_masks')
 
 	# define network
 	l_inspans = lasagne.layers.InputLayer(shape=(None, span_size), 
         input_var=in_spans)
-	l_currmask = lasagne.layers.InputLayer(shape=(None, span_size), 
-		input_var=in_currmasks)
+	l_inneg = lasagne.layers.InputLayer(shape=(None, span_size), 
+        input_var=in_neg)
 	l_slen = lasagne.layers.InputLayer(shape=(None, 1), 
 		input_var=in_slen)
 	l_empty = lasagne.layers.InputLayer(shape=(None, 1), 
@@ -42,9 +44,16 @@ def build_rmn(span_size, d_word, d_hidden, len_voc, num_descs, eps=1e-5, lr=0.01
 	l_applause = lasagne.layers.InputLayer(shape=(None, 1), 
 		input_var=in_applause)
 
+	l_currmask = lasagne.layers.InputLayer(shape=(None, span_size), 
+		input_var=in_currmasks)
+	l_negmask = lasagne.layers.InputLayer(shape=(None, span_size), 
+		input_var=in_negmasks)
+
 
 	l_emb = MyEmbeddingLayer(l_inspans, len_voc, 
 			d_word, name='word_emb')
+	l_negemb = MyEmbeddingLayer(l_inneg, len_voc, 
+			d_word, W=l_emb.W, name='word_neg_emb')
 
 	# freeze embeddings
 	#if freeze_words:
@@ -54,6 +63,7 @@ def build_rmn(span_size, d_word, d_hidden, len_voc, num_descs, eps=1e-5, lr=0.01
 
 	# average each span's embeddings
 	l_currsum = AverageLayer([l_emb, l_currmask], d_word)
+	l_negsum = AverageLayer([l_negemb, l_negmask], d_word)
 	#l_curr = ElemwiseMergeLayer([l_spans, l_currmask], T.mul)
 
 	# pass all embeddings thru feed-forward layer
@@ -69,13 +79,16 @@ def build_rmn(span_size, d_word, d_hidden, len_voc, num_descs, eps=1e-5, lr=0.01
 
 	# compute loss
 	currsums = lasagne.layers.get_output(l_currsum)
+	negsums = lasagne.layers.get_output(l_negsum)
 	recon = lasagne.layers.get_output(l_recon)
 
 	currsums /= currsums.norm(2, axis=1)[:, None]
 	recon /= recon.norm(2, axis=1)[:, None]
+	negsums /= negsums.norm(2, axis=1)[:, None]
 	correct = T.sum(recon * currsums, axis=1)
+	negs = T.dot(recon, negsums.T)
 	loss = T.sum(T.maximum(0., 
-				T.sum(1. - correct[:, None], axis=1)))
+				T.sum(1. - correct[:, None] + negs, axis=1)))
 
 	# enforce orthogonality constraint
 	norm_R = l_recon.R / l_recon.R.norm(2, axis=1)[:, None]
@@ -90,9 +103,8 @@ def build_rmn(span_size, d_word, d_hidden, len_voc, num_descs, eps=1e-5, lr=0.01
 			in_empty, in_laughter, in_applause],
 			lasagne.layers.get_output(l_rels))
 	
-	#ex_cost, ex_ortho = train_fn(span, mask, slen, empty, laughter, applause, allow_input_downcast=True)
 	train_fn = theano.function([in_spans, in_currmasks, in_slen, 
-			in_empty, in_laughter, in_applause],
+			in_empty, in_laughter, in_applause, in_neg, in_negmasks],
 			[loss, ortho_penalty], updates=updates)
 	return train_fn, traj_fn, l_recon
 
@@ -150,9 +162,9 @@ if __name__ == '__main__':
 	for url, data in prep_corpus.items():
 		length = data['length']
 		data_script = data['script']
-		data_mask = np.zeros(data_script.shape, dtype=np.int32)
-		data_empty = np.zeros(length, dtype=np.int32)
-		data_slen = np.zeros(length, dtype=np.int32)
+		data_mask = np.zeros(data_script.shape, dtype=np.float32)
+		data_empty = np.zeros(length, dtype=np.float32)
+		data_slen = np.zeros(length, dtype=np.float32)
 		for i in range(length):
 			is_empty = True
 			scount = 0
@@ -162,7 +174,7 @@ if __name__ == '__main__':
 					scount += 1
 				if wbg not in fbmap:
 					data_script[i, j] = 0
-					data_mask[i, j] = 0
+					data_mask[i, j] = 1
 				else:
 					data_script[i, j] = fbmap[wbg]
 					data_mask[i, j] = 1
@@ -170,13 +182,14 @@ if __name__ == '__main__':
 		
 			if is_empty:
 				data_empty[i] = 1
-			data_slen[i] = scount
+			data_slen[i] = scount / span_size
 
 		data['mask'] = data_mask
-		data['empty'] = data_empty
-		data['slen'] = data_slen
+		data['empty'] = data_empty.reshape((length, 1))
+		data['slen'] = data_slen.reshape((length, 1))
+		data['laughter'] = data['laughter'].reshape((length, 1)).astype(np.float32)
+		data['applause'] = data['applause'].reshape((length, 1)).astype(np.float32)
 		ted_train_data.append(data)
-		print(data)
 		
 
 	descriptor_log = 'models/descriptors.log'
@@ -184,13 +197,16 @@ if __name__ == '__main__':
 
 	
 	# d_word
-	d_word = 300
+	d_word = 100
 
 	# embedding/hidden dimensionality
 	d_hidden = 256
 
 	# number of descriptors
-	num_descs = 30
+	num_descs = 5
+
+	# number of negative samples per relationship
+	num_negs = 50
 
 	# word dropout probability
 	# p_drop = 0.75
@@ -208,7 +224,9 @@ if __name__ == '__main__':
 
 	# training loop
 	min_cost = float('inf')
+	ted_train_data = ted_train_data[:100]
 	for epoch in range(n_epochs):
+		print 'epoch:', epoch
 		cost = 0.
 		random.shuffle(ted_train_data)
 		start_time = time.time()
@@ -216,16 +234,19 @@ if __name__ == '__main__':
 			length = data['length']
 			span = data['script']
 			mask = data['mask']
-			slen = data['slen'].reshape((length, 1))
-			empty = data['empty'].reshape((length, 1))
-			laughter = data['laughter'].reshape((length, 1))
-			applause = data['applause'].reshape((length, 1))
+			slen = data['slen']
+			empty = data['empty']
+			laughter = data['laughter']
+			applause = data['applause']
 
+			ns, nm = ted_generate_negative_samples(\
+				num_traj, span_size, num_negs, ted_train_data)
 
-			print(span.shape, mask.shape, slen.shape, empty.shape, laughter.shape, applause.shape)
-
-			ex_cost, ex_ortho = train_fn(span, mask, slen, empty, laughter, applause)
+			ex_cost, ex_ortho = train_fn(span, mask, slen, empty, laughter, applause, ns, nm)	
+			#print ex_cost
 			cost += ex_cost
+
+		print(cost)
 
 		end_time = time.time()
 		# save params if cost went down
@@ -241,13 +262,14 @@ if __name__ == '__main__':
 			R = p_dict['R']
 			log = open(descriptor_log, 'w')
 			for ind in range(len(R)):
-				desc = R[ind] / np.linalg.norm(R[ind])
-				sims = We.dot(desc.T)
-				ordered_words = np.argsort(sims)[::-1]
-				desc_list = [ revmap[w] for w in ordered_words[:10]]
+				#desc = R[ind] / np.linalg.norm(R[ind])
+				#sims = We.dot(desc.T)
+				#ordered_words = np.argsort(sims)[::-1]
+				#desc_list = [ revmap[w] for w in ordered_words[:10]]
+				desc_list = ['D%d'%ind]
 				log.write(' '.join(desc_list) + '\n')
-				print 'descriptor %d:' % ind
-				print desc_list
+				#print 'descriptor %d:' % ind
+				#print desc_list
 			log.flush()
 			log.close()
 
@@ -276,4 +298,4 @@ if __name__ == '__main__':
 			tlog.close()
 
         print 'done with epoch: ', epoch, ' cost =',\
-			cost / len(span_data), 'time: ', end_time-start_time
+			cost / len(ted_train_data), 'time: ', end_time-start_time
